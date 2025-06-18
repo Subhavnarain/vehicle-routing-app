@@ -1,23 +1,17 @@
-# vehicle_routing_optimizer.py
-
 import pandas as pd
 import numpy as np
 import requests
 import folium
 import streamlit as st
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
-from datetime import datetime, timedelta
 import tempfile
-import os
 
 # Constants
 BUS_CAPACITY = 63
 MAX_DISTANCE_KM = 150
 MAX_DURATION_MIN = 180
 LATEST_DROP_TIME = "08:45"
-
-# Google Maps API
-API_KEY = "AIzaSyCnrRWywQvCKRoQXrSFeauYuA_SzLdsTbI"
+API_KEY = st.secrets["API_KEY"]
 
 # --- Load Input File ---
 def load_data(file):
@@ -110,14 +104,27 @@ def solve_routing(dist_matrix, dur_matrix, demands, num_vehicles, depot):
                 route_duration += dur_matrix[node_index][manager.IndexToNode(next_index)]
             index = next_index
         if len(route) > 1:
+            utilization = round((route_load / BUS_CAPACITY) * 100, 1)
             routes.append({
                 "vehicle_id": vehicle_id,
                 "nodes": route,
                 "load": route_load,
                 "distance_km": round(route_distance, 2),
-                "duration_min": round(route_duration, 2)
+                "duration_min": round(route_duration, 2),
+                "utilization": utilization
             })
     return routes
+
+# --- Snap to Real Roads ---
+def get_road_snapped_polyline(start, end):
+    url = f"https://maps.googleapis.com/maps/api/directions/json?origin={start}&destination={end}&key={API_KEY}"
+    response = requests.get(url).json()
+    if response['status'] == 'OK':
+        steps = response['routes'][0]['legs'][0]['steps']
+        return [(step['start_location']['lat'], step['start_location']['lng']) for step in steps] + [
+            (steps[-1]['end_location']['lat'], steps[-1]['end_location']['lng'])
+        ]
+    return [start, end]
 
 # --- Visualize Routes ---
 def visualize_routes(routes, locations):
@@ -127,14 +134,19 @@ def visualize_routes(routes, locations):
 
     for i, route in enumerate(routes):
         color = colors[i % len(colors)]
-        coords = [(locations.iloc[node].lat, locations.iloc[node].lng) for node in route['nodes']]
-        folium.PolyLine(coords, color=color, weight=5, opacity=0.7).add_to(route_map)
-        folium.Marker(coords[0], popup=f"Bus {route['vehicle_id']} Start").add_to(route_map)
-        folium.Marker(coords[-1], popup=f"End").add_to(route_map)
+        all_coords = []
+        for j in range(len(route['nodes']) - 1):
+            start = locations.iloc[route['nodes'][j]]
+            end = locations.iloc[route['nodes'][j + 1]]
+            snapped = get_road_snapped_polyline(f"{start.lat},{start.lng}", f"{end.lat},{end.lng}")
+            all_coords += snapped
+        folium.PolyLine(all_coords, color=color, weight=5, opacity=0.7).add_to(route_map)
+        folium.Marker(all_coords[0], popup=f"Bus {route['vehicle_id']} Start").add_to(route_map)
+        folium.Marker(all_coords[-1], popup="End").add_to(route_map)
 
     return route_map
 
-# --- Streamlit App ---
+# --- Streamlit App Logic ---
 st.set_page_config(page_title="Vehicle Routing Optimizer", layout="wide")
 st.title("🚌 Vehicle Routing Optimizer")
 
@@ -145,15 +157,15 @@ if uploaded_file:
         df = load_data(uploaded_file)
         locations = build_location_index(df)
         dist_matrix, dur_matrix = fetch_distance_matrix(locations)
-        demands = [0] * len(locations)  # Placeholder — you can enhance with logic
+        demands = [0] * len(locations)  # You can update this to map actual employee counts later
         routes = solve_routing(dist_matrix, dur_matrix, demands, 100, 0)
 
         if routes:
             st.success(f"Found {len(routes)} routes!")
             for route in routes:
-                st.metric(label=f"Bus {route['vehicle_id']} Load", value=f"{route['load']} / {BUS_CAPACITY}")
-                st.metric(label=f"Bus {route['vehicle_id']} Distance", value=f"{route['distance_km']} km")
-                st.metric(label=f"Bus {route['vehicle_id']} Duration", value=f"{route['duration_min']} min")
+                st.markdown(f"### 🚌 Bus {route['vehicle_id']}")
+                st.write(f"**Load:** {route['load']} / {BUS_CAPACITY} → **Utilization:** {route['utilization']}%")
+                st.write(f"**Distance:** {route['distance_km']} km | **Duration:** {route['duration_min']} min")
 
             map_object = visualize_routes(routes, locations)
             with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as f:
