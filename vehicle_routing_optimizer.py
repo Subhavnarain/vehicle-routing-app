@@ -11,25 +11,19 @@ import polyline
 BUS_CAPACITY = 63
 MAX_DISTANCE_KM = 150
 MAX_DURATION_MIN = 180
-LATEST_DROP_TIME = "08:45"
+LATEST_DROP_time = "08:45"
 API_KEY = st.secrets["API_KEY"]
-
-# Load Input
 
 def load_data(file):
     df = pd.read_excel(file)
     df["Latest Drop Time (HH:MM)"] = "08:45"
     return df
 
-# Build unique list of coordinates
-
 def build_location_index(df):
     df_pick = df[["Pickup Latitude", "Pickup Longitude", "Pickup Location Name"]].rename(columns={"Pickup Latitude": "lat", "Pickup Longitude": "lng", "Pickup Location Name": "name"})
     df_drop = df[["Drop Latitude", "Drop Longitude", "Drop Location Name"]].rename(columns={"Drop Latitude": "lat", "Drop Longitude": "lng", "Drop Location Name": "name"})
     locations = pd.concat([df_pick, df_drop]).drop_duplicates().reset_index(drop=True)
     return locations
-
-# Compute matrices
 
 def fetch_distance_matrix(locations):
     n = len(locations)
@@ -44,8 +38,6 @@ def fetch_distance_matrix(locations):
             dist_matrix[i][j] = element['distance']['value'] / 1000
             dur_matrix[i][j] = element['duration']['value'] / 60
     return dist_matrix, dur_matrix
-
-# Solve routing
 
 def solve_routing(dist_matrix, dur_matrix, demands, num_vehicles, depot):
     manager = pywrapcp.RoutingIndexManager(len(dist_matrix), num_vehicles, depot)
@@ -63,10 +55,7 @@ def solve_routing(dist_matrix, dur_matrix, demands, num_vehicles, depot):
 
     routing.SetArcCostEvaluatorOfAllVehicles(routing.RegisterTransitCallback(distance_callback))
     demand_callback_index = routing.RegisterUnaryTransitCallback(lambda idx: demands[manager.IndexToNode(idx)])
-
-    routing.AddDimensionWithVehicleCapacity(
-        demand_callback_index, 0, [BUS_CAPACITY] * num_vehicles, True, 'Capacity')
-
+    routing.AddDimensionWithVehicleCapacity(demand_callback_index, 0, [BUS_CAPACITY] * num_vehicles, True, 'Capacity')
     duration_callback_index = routing.RegisterTransitCallback(duration_callback)
     routing.AddDimension(duration_callback_index, 0, MAX_DURATION_MIN, True, 'Duration')
 
@@ -106,8 +95,6 @@ def solve_routing(dist_matrix, dur_matrix, demands, num_vehicles, depot):
             })
     return routes
 
-# Polyline for entire route
-
 def get_snapped_polyline(coords):
     origin = f"{coords[0][0]},{coords[0][1]}"
     destination = f"{coords[-1][0]},{coords[-1][1]}"
@@ -119,12 +106,9 @@ def get_snapped_polyline(coords):
         return polyline.decode(points)
     return coords
 
-# Draw map
-
 def visualize_routes(routes, locations):
     route_map = folium.Map(location=[locations.iloc[0].lat, locations.iloc[0].lng], zoom_start=10)
-    colors = ['blue', 'green', 'purple', 'orange', 'red', 'darkred', 'lightred',
-              'beige', 'darkblue', 'darkgreen', 'cadetblue', 'darkpurple']
+    colors = ['blue', 'green', 'purple', 'orange', 'red', 'darkred', 'lightred', 'beige', 'darkblue', 'darkgreen', 'cadetblue', 'darkpurple']
     for i, route in enumerate(routes):
         color = colors[i % len(colors)]
         coords = [(locations.iloc[n].lat, locations.iloc[n].lng) for n in route['nodes']]
@@ -134,16 +118,15 @@ def visualize_routes(routes, locations):
         folium.Marker(snapped[-1], popup="End").add_to(route_map)
     return route_map
 
-# Streamlit App
 st.set_page_config(page_title="Vehicle Routing Optimizer", layout="wide")
 st.title("🚌 Vehicle Routing Optimizer")
+
 uploaded_file = st.file_uploader("Upload Routing Excel", type=["xlsx"])
 if uploaded_file:
     with st.spinner("Processing routes..."):
         df = load_data(uploaded_file)
         locations = build_location_index(df)
         dist_matrix, dur_matrix = fetch_distance_matrix(locations)
-        # Assign demand based on Pickup points only
         demands = [0] * len(locations)
         for _, row in df.iterrows():
             for i, loc in locations.iterrows():
@@ -155,7 +138,7 @@ if uploaded_file:
             for i, route in enumerate(routes, start=1):
                 stop_names = [locations.iloc[n].name for n in route['nodes']]
                 st.markdown(f"### 🗺 Route {i}")
-                st.write("**Stops:** " + " → ".join(stop_names))
+                st.write("**Stops:** " + " → ".join(str(name) for name in stop_names))
                 st.write(f"**Distance:** {route['distance_km']} km")
                 st.write(f"**Duration:** {route['duration_min']} min")
                 st.write(f"**Load:** {route['load']} / {BUS_CAPACITY} → **Utilization:** {route['utilization']}%")
