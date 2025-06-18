@@ -1,3 +1,4 @@
+# vehicle_routing_optimizer.py
 
 import pandas as pd
 import numpy as np
@@ -5,16 +6,18 @@ import requests
 import folium
 import streamlit as st
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+from datetime import datetime, timedelta
 import tempfile
+import os
 
 # Constants
 BUS_CAPACITY = 63
-MAX_DISTANCE_KM = 100
-MAX_DURATION_MIN = 120
+MAX_DISTANCE_KM = 150
+MAX_DURATION_MIN = 180
 LATEST_DROP_TIME = "08:45"
 
-# Google Maps API Key
-API_KEY = st.secrets["API_KEY"]
+# Google Maps API
+API_KEY = "AIzaSyCnrRWywQvCKRoQXrSFeauYuA_SzLdsTbI"
 
 # --- Load Input File ---
 def load_data(file):
@@ -127,11 +130,11 @@ def visualize_routes(routes, locations):
         coords = [(locations.iloc[node].lat, locations.iloc[node].lng) for node in route['nodes']]
         folium.PolyLine(coords, color=color, weight=5, opacity=0.7).add_to(route_map)
         folium.Marker(coords[0], popup=f"Bus {route['vehicle_id']} Start").add_to(route_map)
-        folium.Marker(coords[-1], popup="End").add_to(route_map)
+        folium.Marker(coords[-1], popup=f"End").add_to(route_map)
 
     return route_map
 
-# --- Streamlit App Logic ---
+# --- Streamlit App ---
 st.set_page_config(page_title="Vehicle Routing Optimizer", layout="wide")
 st.title("🚌 Vehicle Routing Optimizer")
 
@@ -142,7 +145,7 @@ if uploaded_file:
         df = load_data(uploaded_file)
         locations = build_location_index(df)
         dist_matrix, dur_matrix = fetch_distance_matrix(locations)
-        demands = [0] * len(locations)  # Placeholder logic
+        demands = [0] * len(locations)  # Placeholder — you can enhance with logic
         routes = solve_routing(dist_matrix, dur_matrix, demands, 100, 0)
 
         if routes:
@@ -151,6 +154,7 @@ if uploaded_file:
                 st.metric(label=f"Bus {route['vehicle_id']} Load", value=f"{route['load']} / {BUS_CAPACITY}")
                 st.metric(label=f"Bus {route['vehicle_id']} Distance", value=f"{route['distance_km']} km")
                 st.metric(label=f"Bus {route['vehicle_id']} Duration", value=f"{route['duration_min']} min")
+
             map_object = visualize_routes(routes, locations)
             with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as f:
                 map_object.save(f.name)
